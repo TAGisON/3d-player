@@ -94,10 +94,15 @@ jobs:
 
           echo "Checking the status of the Jenkins job..."
           STATUS="null"
+          BUILD_LOG=""
           for i in {1..60}; do
             BUILD_INFO=$(curl -s -u $USERNAME:$TOKEN "$JENKINS_URL/job/$JOB_NAME/$BUILD_NUMBER/api/json")
             STATUS=$(echo $BUILD_INFO | jq -r '.result')
             if [ "$STATUS" != "null" ]; then
+              # Fetch the last few lines of the build log for error reporting
+              if [ "$STATUS" == "FAILURE" ]; then
+                BUILD_LOG=$(curl -s -u $USERNAME:$TOKEN "$JENKINS_URL/job/$JOB_NAME/$BUILD_NUMBER/consoleText" | tail -n 50)
+              fi
               break
             fi
             echo "Waiting for build to complete... Attempt: $i"
@@ -107,12 +112,6 @@ jobs:
           if [ "$STATUS" == "null" ]; then
             echo "Failed to fetch the status of the Jenkins job after multiple attempts."
             exit 1
-          fi
-
-          # Fetch build logs in case of failure
-          if [ "$STATUS" == "FAILURE" ]; then
-            BUILD_LOG=$(curl -s -u $USERNAME:$TOKEN "$JENKINS_URL/job/$JOB_NAME/$BUILD_NUMBER/consoleText" | tail -n 50)
-            echo "Build failed with error log: $BUILD_LOG"
           fi
 
           # Convert timestamp to human-readable date
@@ -127,6 +126,7 @@ jobs:
           echo "status=$STATUS" >> $GITHUB_ENV
           echo "build_number=$BUILD_NUMBER" >> $GITHUB_ENV
           echo "build_date=$BUILD_DATE" >> $GITHUB_ENV
+          echo "build_log=$BUILD_LOG" >> $GITHUB_ENV
 
       - name: Append Job Status to STATUS.md
         run: |
@@ -139,7 +139,7 @@ jobs:
             MESSAGE="Build succeeded."
           elif [ "$status" == "FAILURE" ]; then
             COLOR="red"
-            MESSAGE="Build failed with error: $BUILD_LOG"
+            MESSAGE="Build failed with error: $build_log"
           elif [ "$status" == "UNSTABLE" ]; then
             COLOR="yellow"
             MESSAGE="Build is unstable."
