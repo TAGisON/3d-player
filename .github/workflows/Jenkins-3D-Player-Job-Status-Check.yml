@@ -19,10 +19,13 @@ jobs:
           TOKEN="11a6a553d88e61d4bc691f2c8e6c0cad98"
 
           # Get the job status and additional info from Jenkins
-          BUILD_INFO=$(curl -s -u $USERNAME:$TOKEN $JENKINS_URL/job/$JOB_NAME/lastBuild/api/json)
+          BUILD_INFO=$(curl -s -u $USERNAME:$TOKEN "$JENKINS_URL/job/$JOB_NAME/lastBuild/api/json")
           STATUS=$(echo $BUILD_INFO | jq -r '.result')
           BUILD_NUMBER=$(echo $BUILD_INFO | jq -r '.number')
           BUILD_TIMESTAMP=$(echo $BUILD_INFO | jq -r '.timestamp')
+
+          # Fetch the build message (last few lines of the console output)
+          BUILD_LOG=$(curl -s -u $USERNAME:$TOKEN "$JENKINS_URL/job/$JOB_NAME/$BUILD_NUMBER/consoleText" | tail -n 10)
 
           # Convert timestamp to human-readable date
           BUILD_DATE=$(date -d @"$(($BUILD_TIMESTAMP / 1000))" +'%Y-%m-%d %H:%M:%S')
@@ -35,31 +38,38 @@ jobs:
           echo "Job Status: $STATUS"
           echo "Build Number: $BUILD_NUMBER"
           echo "Build Date: $BUILD_DATE"
+          echo "Build Log: $BUILD_LOG"
 
           # Set outputs
           echo "status=$STATUS" >> $GITHUB_ENV
           echo "build_number=$BUILD_NUMBER" >> $GITHUB_ENV
           echo "build_date=$BUILD_DATE" >> $GITHUB_ENV
+          echo "build_log=$BUILD_LOG" >> $GITHUB_ENV
 
       - name: Append Job Status to STATUS.md
         run: |
           # Define badge color based on job status
           if [ "$status" == "SUCCESS" ]; then
             COLOR="green"
+            MESSAGE="Build succeeded."
           elif [ "$status" == "FAILURE" ]; then
             COLOR="red"
+            MESSAGE="Build failed with error: $build_log"
           elif [ "$status" == "UNSTABLE" ]; then
             COLOR="yellow"
+            MESSAGE="Build is unstable."
           else
             COLOR="blue"
+            MESSAGE="Build is running or in an unknown state."
           fi
 
-          # Append the new status to STATUS.md with the job status badge, build number, and build date
+          # Append the new status to STATUS.md with the job status badge, build number, build date, and message
           {
             echo "![Jenkins Job Status](https://img.shields.io/badge/Jenkins-$status-$COLOR?style=flat-square)"
             echo ""
             echo "Build Number: $build_number"
             echo "Build Date: $build_date"
+            echo "Message: $MESSAGE"
             echo "---"
           } >> STATUS.md
 
