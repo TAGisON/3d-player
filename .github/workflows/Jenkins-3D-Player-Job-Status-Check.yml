@@ -19,13 +19,10 @@ jobs:
           TOKEN="11a6a553d88e61d4bc691f2c8e6c0cad98"
 
           # Get the job status and additional info from Jenkins
-          BUILD_INFO=$(curl -s -u $USERNAME:$TOKEN "$JENKINS_URL/job/$JOB_NAME/lastBuild/api/json")
+          BUILD_INFO=$(curl -s -u $USERNAME:$TOKEN $JENKINS_URL/job/$JOB_NAME/lastBuild/api/json)
           STATUS=$(echo $BUILD_INFO | jq -r '.result')
           BUILD_NUMBER=$(echo $BUILD_INFO | jq -r '.number')
           BUILD_TIMESTAMP=$(echo $BUILD_INFO | jq -r '.timestamp')
-
-          # Fetch the build message (last few lines of the console output)
-          BUILD_LOG=$(curl -s -u $USERNAME:$TOKEN "$JENKINS_URL/job/$JOB_NAME/$BUILD_NUMBER/consoleText" | tail -n 10)
 
           # Convert timestamp to human-readable date
           BUILD_DATE=$(date -d @"$(($BUILD_TIMESTAMP / 1000))" +'%Y-%m-%d %H:%M:%S')
@@ -35,16 +32,20 @@ jobs:
             STATUS="RUNNING"
           fi
 
+          # Fetch build logs in case of failure
+          if [ "$STATUS" == "FAILURE" ]; then
+            BUILD_LOG=$(curl -s -u $USERNAME:$TOKEN "$JENKINS_URL/job/$JOB_NAME/$BUILD_NUMBER/consoleText" | tail -n 10)
+            echo "Build failed with error log: $BUILD_LOG"
+          fi
+
           echo "Job Status: $STATUS"
           echo "Build Number: $BUILD_NUMBER"
           echo "Build Date: $BUILD_DATE"
-          echo "Build Log: $BUILD_LOG"
 
           # Set outputs
           echo "status=$STATUS" >> $GITHUB_ENV
           echo "build_number=$BUILD_NUMBER" >> $GITHUB_ENV
           echo "build_date=$BUILD_DATE" >> $GITHUB_ENV
-          echo "build_log=$BUILD_LOG" >> $GITHUB_ENV
 
       - name: Append Job Status to STATUS.md
         run: |
@@ -54,13 +55,13 @@ jobs:
             MESSAGE="Build succeeded."
           elif [ "$status" == "FAILURE" ]; then
             COLOR="red"
-            MESSAGE="Build failed with error: $build_log"
+            MESSAGE="Build failed with error log: $BUILD_LOG"
           elif [ "$status" == "UNSTABLE" ]; then
             COLOR="yellow"
             MESSAGE="Build is unstable."
           else
             COLOR="blue"
-            MESSAGE="Build is running or in an unknown state."
+            MESSAGE="Build is still running or unknown state."
           fi
 
           # Append the new status to STATUS.md with the job status badge, build number, build date, and message
