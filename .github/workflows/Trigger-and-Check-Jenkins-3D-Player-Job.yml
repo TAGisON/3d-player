@@ -40,9 +40,40 @@ jobs:
           BRANCH_NAME_ENCODED=$(echo $BRANCH_NAME | jq -s -R -r @uri)
 
           # Trigger the Jenkins parameterized job with inputs
-          curl -X POST -u $USERNAME:$TOKEN "$JENKINS_URL/job/$JOB_NAME/buildWithParameters?DEPLOYMENT_SERVER=$DEPLOYMENT_SERVER_ENCODED&PORT=$PORT_ENCODED&BRANCH_NAME=$BRANCH_NAME_ENCODED" -v
+          TRIGGER_RESPONSE=$(curl -X POST -u $USERNAME:$TOKEN "$JENKINS_URL/job/$JOB_NAME/buildWithParameters?DEPLOYMENT_SERVER=$DEPLOYMENT_SERVER_ENCODED&PORT=$PORT_ENCODED&BRANCH_NAME=$BRANCH_NAME_ENCODED" -i)
+
+          # Extract the queue URL from the trigger response to track the build
+          QUEUE_URL=$(echo "$TRIGGER_RESPONSE" | grep -Fi Location | awk '{print $2}' | tr -d '\r')
+
+          echo "Triggered Jenkins job. Queue URL: $QUEUE_URL"
           
-          echo "Jenkins parameterized job triggered."
+      - name: Wait for Build to Start and Fetch Build Number
+        id: fetch-build-number
+        run: |
+          JENKINS_URL="http://45.79.122.237:8080"
+          USERNAME="coral"
+          TOKEN="11a6a553d88e61d4bc691f2c8e6c0cad98"
+
+          # Wait for the job to be scheduled in Jenkins
+          sleep 10
+
+          # Poll the queue URL to get the build number
+          for i in {1..30}; do
+            BUILD_NUMBER=$(curl -s -u $USERNAME:$TOKEN "${QUEUE_URL}api/json" | jq -r '.executable.number')
+            if [ "$BUILD_NUMBER" != "null" ]; then
+              echo "Build number: $BUILD_NUMBER"
+              break
+            fi
+            echo "Waiting for build to be scheduled..."
+            sleep 5
+          done
+
+          if [ "$BUILD_NUMBER" == "null" ]; then
+            echo "Failed to retrieve the build number from Jenkins queue."
+            exit 1
+          fi
+
+          echo "build_number=$BUILD_NUMBER" >> $GITHUB_ENV
 
       - name: Check Jenkins Job Status
         id: jenkins-status
@@ -51,20 +82,28 @@ jobs:
           JENKINS_URL="http://45.79.122.237:8080"
           USERNAME="coral"
           TOKEN="11a6a553d88e61d4bc691f2c8e6c0cad98"
+          BUILD_NUMBER=${{ env.build_number }}
 
-          # Get the job status and additional info from Jenkins
-          BUILD_INFO=$(curl -s -u $USERNAME:$TOKEN $JENKINS_URL/job/$JOB_NAME/lastBuild/api/json)
-          STATUS=$(echo $BUILD_INFO | jq -r '.result')
-          BUILD_NUMBER=$(echo $BUILD_INFO | jq -r '.number')
-          BUILD_TIMESTAMP=$(echo $BUILD_INFO | jq -r '.timestamp')
+          # Wait for the job to complete
+          for i in {1..60}; do
+            BUILD_INFO=$(curl -s -u $USERNAME:$TOKEN "$JENKINS_URL/job/$JOB_NAME/$BUILD_NUMBER/api/json")
+            STATUS=$(echo $BUILD_INFO | jq -r '.result')
+            if [ "$STATUS" != "null" ]; then
+              break
+            fi
+            echo "Waiting for build to complete..."
+            sleep 10
+          done
+
+          # Fetch build logs in case of failure
+          if [ "$STATUS" == "FAILURE" ]; then
+            BUILD_LOG=$(curl -s -u $USERNAME:$TOKEN "$JENKINS_URL/job/$JOB_NAME/$BUILD_NUMBER/consoleText" | tail -n 50)
+            echo "Build failed with error log: $BUILD_LOG"
+          fi
 
           # Convert timestamp to human-readable date
+          BUILD_TIMESTAMP=$(echo $BUILD_INFO | jq -r '.timestamp')
           BUILD_DATE=$(date -d @"$(($BUILD_TIMESTAMP / 1000))" +'%Y-%m-%d %H:%M:%S')
-
-          if [ "$STATUS" == "null" ]; then
-            echo "Job is running or has never been built."
-            STATUS="RUNNING"
-          fi
 
           echo "Job Status: $STATUS"
           echo "Build Number: $BUILD_NUMBER"
@@ -80,20 +119,25 @@ jobs:
           # Define badge color based on job status
           if [ "$status" == "SUCCESS" ]; then
             COLOR="green"
+            MESSAGE="Build succeeded."
           elif [ "$status" == "FAILURE" ]; then
             COLOR="red"
+            MESSAGE="Build failed with error: $BUILD_LOG"
           elif [ "$status" == "UNSTABLE" ]; then
             COLOR="yellow"
+            MESSAGE="Build is unstable."
           else
             COLOR="blue"
+            MESSAGE="Build is still running or unknown state."
           fi
 
-          # Append the new status to STATUS.md with the job status badge, build number, and build date
+          # Append the new status to STATUS.md with the job status badge, build number, build date, and message
           {
             echo "![Jenkins Job Status](https://img.shields.io/badge/Jenkins-$status-$COLOR?style=flat-square)"
             echo ""
             echo "Build Number: $build_number"
             echo "Build Date: $build_date"
+            echo "Message: $MESSAGE"
             echo "---"
           } >> STATUS.md
 
