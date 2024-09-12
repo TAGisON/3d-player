@@ -37,3 +37,9 @@ Build Number: 8
 Build Date: 2024-09-12 12:21:18
 Message: Build failed with error log: 
 ---
+![Jenkins Job Status](https://img.shields.io/badge/Jenkins-FAILURE-red?style=flat-square)
+
+Build Number: 22
+Build Date: 2024-09-12 15:19:49
+Message: Build failed with error: 
+---
