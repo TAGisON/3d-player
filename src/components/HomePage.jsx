@@ -4,9 +4,9 @@ import "./HomePage.css";
 import VirtualTourImage from "../assets/VirtualTour.jpg";
 import VirtualTour from "../assets/VirtualTour.mp4"; 
 import SpaceImage from "../assets/Space.jpg";
-import videoSpace from "../assets/Space.mp4";
+// import videoSpace from "../assets/Space.mp4";
 import SkydiveImage from "../assets/Skydive.png";
-import Skydive from "../assets/Skydive.mp4";
+// import Skydive from "../assets/Skydive.mp4";
 
 export default function HomePage() {
   const navigate = useNavigate();
@@ -44,21 +44,21 @@ export default function HomePage() {
             src={SpaceImage}
             alt="Watch Video"
             className="thumbnail"
-            onClick={() => handleClick(videoSpace)}
+            onClick={() => handleClick(VirtualTour)}
           />
           <button 
           className="info-text"
-          onClick={() => handleClick(videoSpace)} >Experience Reality</button>
+          onClick={() => handleClick(VirtualTour)} >Experience Reality</button>
         </main>
         <main className="main">
           <img
             src={SkydiveImage}
             alt="Watch Video"
             className="thumbnail"
-            onClick={() => handleClick(Skydive)}
+            onClick={() => handleClick(VirtualTour)}
           />
           <button className="info-text"
-          onClick={() => handleClick(Skydive)}>Experience Reality</button>
+          onClick={() => handleClick(VirtualTour)}>Experience Reality</button>
         </main>
       </div>
     </div>
