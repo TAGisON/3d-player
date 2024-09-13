@@ -91,3 +91,7 @@ Build Number: 44
 Build Date: 2024-09-13 09:59:46
 Message: Build failed with error: 
 ---
+![Job Status](https://img.shields.io/badge/Job_Status-Build failed with error: -red)
+Build Number: 46
+Build Date: 2024-09-13 10:04:16
+
