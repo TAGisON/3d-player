@@ -99,3 +99,7 @@ Build Date: 2024-09-13 10:04:16
 Build Number: 49
 Build Date: 2024-09-13 10:10:56
 
+![Job Status](https://img.shields.io/badge/Job_Status-Build failed with error: -red)
+Build Number: 50
+Build Date: 2024-09-13 10:12:51
+
