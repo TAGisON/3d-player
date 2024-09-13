@@ -95,3 +95,7 @@ Message: Build failed with error:
 Build Number: 46
 Build Date: 2024-09-13 10:04:16
 
+![Job Status](https://img.shields.io/badge/Job_Status-Build succeeded.-green)
+Build Number: 49
+Build Date: 2024-09-13 10:10:56
+
