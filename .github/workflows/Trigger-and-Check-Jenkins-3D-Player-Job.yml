@@ -1,49 +1,75 @@
-name: Trigger and Check Jenkins 3D Player Job
+name: Install Prerequisites and Trigger Jenkins Job
 
 on:
   workflow_dispatch:
     inputs:
-      deployment_server:
-        description: "The IP address of the server to deploy to"
+      server_ip:
+        description: 'The IP address of the server'
         required: true
-        default: "45.79.122.237"
-      port:
-        description: "The port to deploy the application on (between 8000 and 9000)"
+        default: '45.79.122.237'
+      ssh_user:
+        description: 'SSH user'
         required: true
-        default: "8000"
-      branch_name:
-        description: "The Git branch to build from"
+        default: 'rishi'
+      ssh_password:
+        description: 'SSH password'
         required: true
-        default: "main"
+        default: ''
+      jenkins_job:
+        description: 'Jenkins Job to verify installation'
+        required: true
 
 jobs:
-  trigger-and-check-jenkins:
+  install_and_trigger:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
-
-      - name: Trigger Jenkins Parameterized Job
-        id: trigger-jenkins
+      - name: Install Prerequisites on Server
+        env:
+          SERVER_IP: ${{ github.event.inputs.server_ip }}
+          SSH_USER: ${{ github.event.inputs.ssh_user }}
+          SSH_PASSWORD: ${{ github.event.inputs.ssh_password }}
         run: |
-          set -e
-          JOB_NAME="3d-player-build-job"
-          JENKINS_URL="http://45.79.122.237:8080"
-          USERNAME="coral"
-          TOKEN="11a6a553d88e61d4bc691f2c8e6c0cad98"
-          DEPLOYMENT_SERVER="${{ github.event.inputs.deployment_server }}"
-          PORT="${{ github.event.inputs.port }}"
-          BRANCH_NAME="${{ github.event.inputs.branch_name }}"
+          echo "Installing prerequisites on the server..."
+          sshpass -p "$SSH_PASSWORD" ssh -o StrictHostKeyChecking=no $SSH_USER@$SERVER_IP << 'EOF'
+            sudo apt update
+            sudo apt install -y git curl make net-tools python3-venv pipx
+            sudo pipx install --force ansible
+            echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+            source ~/.bashrc
+          EOF
 
-          # URL encode parameters
-          DEPLOYMENT_SERVER_ENCODED=$(echo $DEPLOYMENT_SERVER | jq -s -R -r @uri)
-          PORT_ENCODED=$(echo $PORT | jq -s -R -r @uri)
-          BRANCH_NAME_ENCODED=$(echo $BRANCH_NAME | jq -s -R -r @uri)
+      - name: Clone Repository and Update hosts.ini
+        env:
+          SERVER_IP: ${{ github.event.inputs.server_ip }}
+          SSH_USER: ${{ github.event.inputs.ssh_user }}
+          SSH_PASSWORD: ${{ github.event.inputs.ssh_password }}
+        run: |
+          echo "Cloning repository and updating hosts.ini..."
+          sshpass -p "$SSH_PASSWORD" ssh -o StrictHostKeyChecking=no $SSH_USER@$SERVER_IP << EOF
+            if [ -d "aether-onramp" ]; then
+              echo "Removing existing aether-onramp directory..."
+              sudo rm -rf aether-onramp
+            fi
+            git clone --recursive https://$GITHUB_ACTOR:${{ secrets.GH_TOKEN }}@github.com/TAGisON/aether-onramp.git
+            cd aether-onramp || { echo "Failed to change directory"; exit 1; }
+            echo "[node1]" >> hosts.ini
+            echo "${SERVER_IP} ansible_user=${SSH_USER} ansible_password=${SSH_PASSWORD}" >> hosts.ini
+            sed -i "s/ip: \"10.76.28.113\"/ip: \"${SERVER_IP}\"/" vars/main.yml
+          EOF
 
-          # Trigger the Jenkins parameterized job with inputs
-          TRIGGER_RESPONSE=$(curl -X POST -u $USERNAME:$TOKEN "$JENKINS_URL/job/$JOB_NAME/buildWithParameters?DEPLOYMENT_SERVER=$DEPLOYMENT_SERVER_ENCODED&PORT=$PORT_ENCODED&BRANCH_NAME=$BRANCH_NAME_ENCODED" -i)
+      - name: Trigger Jenkins Job
+        id: trigger-jenkins
+        env:
+          JENKINS_URL: 'http://45.79.122.237:8080'
+          JENKINS_USER: 'coral'
+          JENKINS_TOKEN: ${{ secrets.JENKINS_TOKEN }}
+          JENKINS_JOB: ${{ github.event.inputs.jenkins_job }}
+        run: |
+          echo "Triggering Jenkins job..."
+          TRIGGER_RESPONSE=$(curl -s -u "$JENKINS_USER:$JENKINS_TOKEN" -X POST "$JENKINS_URL/job/$JENKINS_JOB/build")
           
-          # Extract the queue URL from the trigger response to track the build
+          # Extract the queue URL to track the build
           QUEUE_URL=$(echo "$TRIGGER_RESPONSE" | grep -Fi Location | awk '{print $2}' | tr -d '\r')
 
           if [ -z "$QUEUE_URL" ]; then
@@ -53,20 +79,19 @@ jobs:
 
           echo "Triggered Jenkins job. Queue URL: $QUEUE_URL"
           echo "queue_url=$QUEUE_URL" >> $GITHUB_ENV
-          
+
       - name: Wait for Build to Start and Fetch Build Number
         id: fetch-build-number
+        env:
+          JENKINS_URL: 'http://45.79.122.237:8080'
+          JENKINS_USER: 'coral'
+          JENKINS_TOKEN: ${{ secrets.JENKINS_TOKEN }}
+          QUEUE_URL: ${{ env.queue_url }}
         run: |
-          set -e
-          JENKINS_URL="http://45.79.122.237:8080"
-          USERNAME="coral"
-          TOKEN="11a6a553d88e61d4bc691f2c8e6c0cad98"
-          QUEUE_URL="${{ env.queue_url }}"
-          
           echo "Polling Jenkins queue to fetch build number..."
           BUILD_NUMBER="null"
           for i in {1..30}; do
-            BUILD_NUMBER=$(curl -s -u $USERNAME:$TOKEN "${QUEUE_URL}api/json" | jq -r '.executable.number')
+            BUILD_NUMBER=$(curl -s -u "$JENKINS_USER:$JENKINS_TOKEN" "${QUEUE_URL}api/json" | jq -r '.executable.number')
             if [ "$BUILD_NUMBER" != "null" ]; then
               echo "Build number: $BUILD_NUMBER"
               break
@@ -84,19 +109,18 @@ jobs:
 
       - name: Check Jenkins Job Status
         id: jenkins-status
-        run: |
-          set -e
-          JOB_NAME="3d-player-build-job"
-          JENKINS_URL="http://45.79.122.237:8080"
-          USERNAME="coral"
-          TOKEN="11a6a553d88e61d4bc691f2c8e6c0cad98"
+        env:
+          JENKINS_URL: 'http://45.79.122.237:8080'
+          JENKINS_USER: 'coral'
+          JENKINS_TOKEN: ${{ secrets.JENKINS_TOKEN }}
+          JENKINS_JOB: ${{ github.event.inputs.jenkins_job }}
           BUILD_NUMBER="${{ env.build_number }}"
-
+        run: |
           echo "Checking the status of the Jenkins job..."
           STATUS="null"
           for i in {1..60}; do
-            BUILD_INFO=$(curl -s -u $USERNAME:$TOKEN "$JENKINS_URL/job/$JOB_NAME/$BUILD_NUMBER/api/json")
-            STATUS=$(echo $BUILD_INFO | jq -r '.result')
+            BUILD_INFO=$(curl -s -u "$JENKINS_USER:$JENKINS_TOKEN" "$JENKINS_URL/job/$JENKINS_JOB/$BUILD_NUMBER/api/json")
+            STATUS=$(echo "$BUILD_INFO" | jq -r '.result')
             if [ "$STATUS" != "null" ]; then
               break
             fi
@@ -109,24 +133,25 @@ jobs:
             exit 1
           fi
 
-          # Fetch build logs in case of failure
-          if [ "$STATUS" == "FAILURE" ]; then
-            BUILD_LOG=$(curl -s -u $USERNAME:$TOKEN "$JENKINS_URL/job/$JOB_NAME/$BUILD_NUMBER/consoleText" | tail -n 50)
-            echo "Build failed with error log: $BUILD_LOG"
-          fi
-
-          # Convert timestamp to human-readable date
-          BUILD_TIMESTAMP=$(echo $BUILD_INFO | jq -r '.timestamp')
-          BUILD_DATE=$(date -d @"$(($BUILD_TIMESTAMP / 1000))" +'%Y-%m-%d %H:%M:%S')
-
           echo "Job Status: $STATUS"
           echo "Build Number: $BUILD_NUMBER"
-          echo "Build Date: $BUILD_DATE"
 
-          # Set outputs
+          # Log the results
           echo "status=$STATUS" >> $GITHUB_ENV
           echo "build_number=$BUILD_NUMBER" >> $GITHUB_ENV
-          echo "build_date=$BUILD_DATE" >> $GITHUB_ENV
+
+      - name: Get Jenkins Job Logs
+        env:
+          JENKINS_URL: 'http://45.79.122.237:8080'
+          JENKINS_USER: 'coral'
+          JENKINS_TOKEN: ${{ secrets.JENKINS_TOKEN }}
+          JENKINS_JOB: ${{ github.event.inputs.jenkins_job }}
+          BUILD_NUMBER="${{ env.build_number }}"
+        run: |
+          echo "Fetching logs for build number: $BUILD_NUMBER"
+          LOGS=$(curl -s -u "$JENKINS_USER:$JENKINS_TOKEN" "$JENKINS_URL/job/$JENKINS_JOB/$BUILD_NUMBER/consoleText")
+          echo "Jenkins job logs:"
+          echo "$LOGS"
 
       - name: Append Job Status to STATUS.md
         run: |
@@ -139,7 +164,7 @@ jobs:
             MESSAGE="Build succeeded."
           elif [ "$status" == "FAILURE" ]; then
             COLOR="red"
-            MESSAGE="Build failed with error: $BUILD_LOG"
+            MESSAGE="Build failed."
           elif [ "$status" == "UNSTABLE" ]; then
             COLOR="yellow"
             MESSAGE="Build is unstable."
@@ -148,12 +173,11 @@ jobs:
             MESSAGE="Build is still running or unknown state."
           fi
 
-          # Append the new status to STATUS.md with the job status badge, build number, build date, and message
+          # Append the new status to STATUS.md with the job status badge, build number, and message
           {
             echo "![Jenkins Job Status](https://img.shields.io/badge/Jenkins-$status-$COLOR?style=flat-square)"
             echo ""
             echo "Build Number: $build_number"
-            echo "Build Date: $build_date"
             echo "Message: $MESSAGE"
             echo "---"
           } >> STATUS.md
@@ -166,4 +190,4 @@ jobs:
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add STATUS.md
           git commit -m "Update STATUS.md with Jenkins job status"
-          git push https://x-access-token:${GH_TOKEN}@github.com/TAGisON/3d-player.git
+          git push https://x-access-token:${GH_TOKEN}@github.com/TAGisON/aether-onramp.git
