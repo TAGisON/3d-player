@@ -131,3 +131,9 @@ Build Number: 55
 Build Date: 2024-09-27 12:54:58
 Message: Build succeeded.
 ---
+![Jenkins Job Status](https://img.shields.io/badge/Jenkins-SUCCESS-green?style=flat-square)
+
+Build Number: 55
+Build Date: 2024-09-27 12:54:58
+Message: Build succeeded.
+---
